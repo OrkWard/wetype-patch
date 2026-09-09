@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "reviewed": true,
+  "bundle_id": "com.tencent.inputmethod.wetype",
+  "version": "2.0.0",
+  "build": "570",
+  "executable": "WeType",
+  "executable_sha256": "5d3d513fb14c4b2fa45df577a00c07bf7775a1db5e65a02db95ebb7cf45503a6",
+  "symbols": {
+    "getter": "_$s6WeType15InputControllerC16currentASCIIModeSbvg",
+    "controller_slot": "_$s6WeType1GV22currentInputControllerAA0dE0CSgvpZ",
+    "controller_init_token": "_$s6WeType1GV22currentInputController_Wz",
+    "toggle_action": "_$s6WeType11AppDelegateC15changeInputModeyyFTo"
+  },
+  "architectures": {
+    "x86_64": {
+      "header_padding": 608,
+      "padding_is_zero": true,
+      "text_sha256": "72af064803fd9d35c165bd7f447fdd7553b00677ca8ed7c04759b5430d418034",
+      "addresses": {
+        "getter": 4295470816,
+        "toggle_action": 4295698848,
+        "controller_init_token": 4326279008,
+        "controller_slot": 4326597704
+      }
+    },
+    "arm64": {
+      "header_padding": 14304,
+      "padding_is_zero": true,
+      "text_sha256": "a92beb2dffbc7bc7da4ace4efd75b21f5954859d7da5febdbd27fd49d9163180",
+      "addresses": {
+        "getter": 4295442204,
+        "toggle_action": 4295648196,
+        "controller_init_token": 4343720096,
+        "controller_slot": 4344071864
+      }
+    }
+  },
+  "review_notes": "2.0.0 (570): arm64 menu/CLI traces verified toggle. Getter follows per-app InputMode.states with G.setting fallback, as used by AppDelegate. x86_64 getter reviewed statically; live runtime tests pending."
+}

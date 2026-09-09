@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "reviewed": true,
+  "bundle_id": "com.tencent.inputmethod.wetype",
+  "version": "2.2.3",
+  "build": "657",
+  "executable": "WeType",
+  "executable_sha256": "a68a92300cc38e5941f59832c516a37eb098c10c6bbe47ab3dcbe812705cf5ee",
+  "symbols": {
+    "getter": "_$s6WeType15InputControllerC16currentASCIIModeSbvg",
+    "controller_slot": "_$s6WeType1GV22currentInputControllerAA0dE0CSgvpZ",
+    "controller_init_token": "_$s6WeType1GV22currentInputController_Wz",
+    "toggle_action": "_$s6WeType11AppDelegateC15changeInputModeyyFTo"
+  },
+  "architectures": {
+    "x86_64": {
+      "header_padding": 3000,
+      "padding_is_zero": true,
+      "text_sha256": "56671997f89ac34775498c5b6f059f9dc71ee9b95429d60942fc087699e0fb22",
+      "addresses": {
+        "getter": 4296216224,
+        "toggle_action": 4296475904,
+        "controller_init_token": 4332090592,
+        "controller_slot": 4332509104
+      }
+    },
+    "arm64": {
+      "header_padding": 11928,
+      "padding_is_zero": true,
+      "text_sha256": "c72ab5c4fd6263f74203451c4dff70c4f97107032f4b027e7d67175a0b1e9032",
+      "addresses": {
+        "getter": 4296137036,
+        "toggle_action": 4296371136,
+        "controller_init_token": 4348737184,
+        "controller_slot": 4349188384
+      }
+    }
+  },
+  "review_notes": "arm64 static review: currentASCIIMode uses Swift self x20, per-client InputMode.states with G.setting fallback; currentInputController initialized by swift_unknownObjectWeakInit and loaded through swift_unknownObjectWeakLoadStrong after swift_once token -1; AppDelegate ObjC void action reads this getter, inverts it, and synchronously calls InputMode.changeInputMode. x86_64 retained for source identification only, not delivery. System installation at /Library/Input Methods/WeType.app is required by the original main() path check. Real arm64 English-entry session passed idempotent chinese/english and toggle; stop and normal restart restored IPC, PID 27857 -> 28529. Actual text/candidate output awaits user confirmation; cross-application behavior not separately tested."
+}
