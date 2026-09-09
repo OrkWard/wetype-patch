@@ -5,4 +5,4 @@
 static NSString * const WTRequestName = @"local.orkward.wetype.bridge.request.v1";
 static NSString * const WTReplyName = @"local.orkward.wetype.bridge.reply.v1";
 static NSString * const WTBundleID = @"com.tencent.inputmethod.wetype";
-static NSString * const WTBridgeVersion = @"1.0.1";
+static NSString * const WTBridgeVersion = @"1.1.0";

@@ -97,7 +97,11 @@ def header(reviewed):
         for key, macro in [('getter', 'WT_GETTER_ADDRESS'), ('controller_slot', 'WT_CONTROLLER_SLOT'),
                            ('controller_init_token', 'WT_CONTROLLER_INIT_TOKEN')]:
             lines.append(f'#define {macro} UINT64_C({part["addresses"][key]:#x})')
-        digest = ', '.join(f'0x{x:02x}' for x in bytes.fromhex(part['text_sha256']))
+        patches = reviewed.get('code_patches', {}).get(arch, [])
+        text_sha256 = patches[0]['patched_text_sha256'] if patches else part['text_sha256']
+        if any(patch.get('patched_text_sha256') != text_sha256 for patch in patches):
+            raise ValueError(f'Conflicting patched text fingerprints for {arch}')
+        digest = ', '.join(f'0x{x:02x}' for x in bytes.fromhex(text_sha256))
         lines.append(f'static const unsigned char WT_TEXT_SHA256[32] = {{{digest}}};')
     lines.extend(['#else', '#error Unreviewed architecture', '#endif', ''])
     return '\n'.join(lines)

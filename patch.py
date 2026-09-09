@@ -15,10 +15,13 @@ import macho
 import version_profile
 
 ROOT = Path(__file__).resolve().parent
-PATCH_VERSION = '1.0.1'
+PATCH_VERSION = '1.1.0'
 TARGET_ARCHES = {'arm64'}
 ENGLISH_ID = 'com.tencent.inputmethod.wetype.english'
 ENGLISH_NAME = '微信输入法'
+FORCE_DEFAULT_ASCII_SYMBOL = '_$s6WeType9InputModeV18isDefaultASCIIMode8bundleIDSbSS_tFZTf4nd_n'
+FORCE_DEFAULT_ASCII_ORIGINAL = bytes.fromhex('60020012')  # and w0, w19, #1
+FORCE_DEFAULT_ASCII_REPLACEMENT = bytes.fromhex('20008052')  # mov w0, #1
 
 
 def run(*args):
@@ -109,6 +112,72 @@ def compile_tools(work, app, profile):
         run('codesign', '--force', '--sign', '-', '--timestamp=none', destination)
 
 
+def code_patches(profile, arch):
+    patches = profile.get('code_patches', {}).get(arch, [])
+    if not isinstance(patches, list):
+        raise ValueError(f'Invalid code patches for {arch}')
+    result = []
+    for item in patches:
+        if (not isinstance(item, dict) or set(item) != {'name', 'symbol', 'address', 'original',
+                'replacement', 'patched_text_sha256'} or
+            not isinstance(item['address'], int) or item['address'] < 0 or
+            not isinstance(item['original'], str) or not isinstance(item['replacement'], str)):
+            raise ValueError(f'Invalid reviewed code patch for {arch}')
+        try:
+            original = bytes.fromhex(item['original'])
+            replacement = bytes.fromhex(item['replacement'])
+        except ValueError as error:
+            raise ValueError(f'Invalid code-patch bytes for {arch}') from error
+        if not original or len(original) != len(replacement) or len(original) % 4:
+            raise ValueError(f'Invalid code-patch width for {arch}')
+        if (arch != 'arm64' or item['name'] != 'force_default_ascii' or
+            item['symbol'] != FORCE_DEFAULT_ASCII_SYMBOL or original != FORCE_DEFAULT_ASCII_ORIGINAL or
+            replacement != FORCE_DEFAULT_ASCII_REPLACEMENT):
+            raise ValueError(f'Unsupported reviewed code patch for {arch}')
+        digest = item['patched_text_sha256']
+        if not isinstance(digest, str) or len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
+            raise ValueError(f'Invalid patched text fingerprint for {arch}')
+        result.append((item, original, replacement))
+    return result
+
+
+def apply_code_patches(data, profile, arch):
+    """Apply only byte-exact, reviewed instruction replacements inside __text."""
+    parts = macho.slices(data)
+    if len(parts) != 1 or parts[0]['arch'] != arch:
+        raise ValueError(f'Expected one {arch} image for code patching')
+    text = next(s for s in parts[0]['sections'] if s['segment'] == '__TEXT' and s['section'] == '__text')
+    out = bytearray(data)
+    ranges = []
+    expected_digest = None
+    for item, original, replacement in code_patches(profile, arch):
+        address = item['address']
+        if not text['address'] <= address or address + len(original) > text['address'] + text['size']:
+            raise ValueError(f'Code patch outside __text: {item["name"]}')
+        offset = text['offset'] + address - text['address']
+        current = bytes(out[offset:offset + len(original)])
+        if current != original:
+            raise ValueError(f'Original instruction mismatch: {item["name"]}')
+        if any(start < offset + len(original) and offset < end for start, end in ranges):
+            raise ValueError(f'Overlapping code patch: {item["name"]}')
+        ranges.append((offset, offset + len(original)))
+        out[offset:offset + len(original)] = replacement
+        if expected_digest is not None and expected_digest != item['patched_text_sha256']:
+            raise ValueError(f'Conflicting patched text fingerprints for {arch}')
+        expected_digest = item['patched_text_sha256']
+    if expected_digest:
+        patched = macho.slices(out)[0]
+        patched_text = next(s for s in patched['sections'] if s['segment'] == '__TEXT' and s['section'] == '__text')
+        if patched_text['sha256'] != expected_digest:
+            raise ValueError(f'Patched text fingerprint mismatch for {arch}')
+    return bytes(out)
+
+
+def expected_text_sha256(profile, arch):
+    patches = code_patches(profile, arch)
+    return patches[0][0]['patched_text_sha256'] if patches else profile['architectures'][arch]['text_sha256']
+
+
 def verify(app, expected=None):
     run('codesign', '--verify', '--deep', '--strict', app)
     info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
@@ -139,8 +208,8 @@ def verify(app, expected=None):
         if matches != [{'command': macho.LC_LOAD_DYLIB, 'path': macho.LOAD_PATH}]:
             raise ValueError('Missing/duplicate/wrong bridge load command')
         text = next(s for s in part['sections'] if s['section'] == '__text' and s['segment'] == '__TEXT')
-        if text['sha256'] != expected['architectures'][part['arch']]['text_sha256']:
-            raise ValueError('Original executable instructions changed')
+        if text['sha256'] != expected_text_sha256(expected, part['arch']):
+            raise ValueError('Executable instructions differ from the reviewed original plus code patches')
     for relative in ('Contents/Frameworks/libwetype-bridge.dylib', 'Contents/MacOS/wetype-cli'):
         file = app / relative
         images = macho.slices(file.read_bytes())
@@ -162,8 +231,11 @@ def verify(app, expected=None):
     english = ENGLISH_ID in modes
     if english and modes[ENGLISH_ID]['TISIntendedLanguage'] != 'en':
         raise ValueError('Incorrect English-entry language')
+    forced_ascii = any(item[0]['name'] == 'force_default_ascii' for arch in target_arches
+                       for item in code_patches(expected, arch))
     return {'verified': True, 'tool_version': PATCH_VERSION, 'architectures': sorted(target_arches),
-            'english_entry': english, 'note': 'Ad-hoc integrity/static checks only; live input tests are separate.'}
+            'english_entry': english, 'force_default_ascii': forced_ascii,
+            'note': 'Ad-hoc integrity/static checks only; live input tests are separate.'}
 
 
 def build(source, output, profile_path, english):
@@ -182,6 +254,7 @@ def build(source, output, profile_path, english):
     original = (source / 'Contents/MacOS' / actual['executable']).read_bytes()
     arm = next(part for part in macho.slices(original) if part['arch'] == 'arm64')
     patched = macho.patch(original[arm['offset']:arm['offset'] + arm['size']])
+    patched = apply_code_patches(patched, reviewed, 'arm64')
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.wetype-build-', dir=output.parent) as temp:
         work = Path(temp)
