@@ -16,7 +16,7 @@
 
 - `isDefaultASCIIMode(bundleID:)` 的统一返回值改为 false。原生 getter、菜单和快捷键统一读写全局模式，换 controller 不会先选中另一份应用模式。
 - `resetInputMode()` 直接返回，停用原厂的激活超时、输入源同步及设置通知触发的模式重置。
-- `activateServer` 的 `0x1001187ac–0x100118880` 模式处理段替换为同步调用 `WTBridgeActivate(controller)`。随后继续原生菜单和输入状态更新。汇编源在 `src/activation-arm64.s`，构建时校验其编译结果与 profile 一致。
+- `activateServer` 的 `0x1001187ac–0x100118880` 模式处理段替换为同步调用 `WTBridgeActivate(controller)`，随后保留原版 `G.setting` 的 once 初始化和时间维护，再继续原生菜单与输入状态更新。汇编源在 `src/activation-arm64.s`，构建时校验其编译结果与 profile 一致。
 
 新增运行文件只有该 dylib 和 `Contents/MacOS/wetype-cli`。
 保留原中文入口；新增 `.english`，语言 en，显示名同为“微信输入法”。

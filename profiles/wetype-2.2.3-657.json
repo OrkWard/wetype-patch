@@ -20,7 +20,7 @@
         "address": 4298508072,
         "original": "60020012",
         "replacement": "00008052",
-        "patched_text_sha256": "ef4251b028ac92adfeaab8769322554178727c5a3f709b222ccc5346336b04ba"
+        "patched_text_sha256": "b9f09bb47ff01351a95fc5bd5eeea5afdf23f160a68cef5c3d0b9b5e17ea8da2"
       },
       {
         "name": "disable_mode_reset",
@@ -28,15 +28,15 @@
         "address": 4298508152,
         "original": "fc6fbaa9",
         "replacement": "c0035fd6",
-        "patched_text_sha256": "ef4251b028ac92adfeaab8769322554178727c5a3f709b222ccc5346336b04ba"
+        "patched_text_sha256": "b9f09bb47ff01351a95fc5bd5eeea5afdf23f160a68cef5c3d0b9b5e17ea8da2"
       },
       {
         "name": "native_activation",
         "symbol": "_$s6WeType15InputControllerC14activateServeryyypSgF",
         "address": 4296116140,
         "original": "f40316aa67140094fb0300aa1f5ea5940840601e689101f008f142f91f0500b161360054f39401b0683244f9002d40fd0039601e0800c4d28813e8f20101679e0020611e8d040054e11f0994f40316aa5414009408000012690300123f01086ba0030054f90300aae00315aac56ca594f40300aa200200b53b00805220008052812d8c52412faf720280fcd2f40316aae0f7ff97f40300aae00315aae10314aaa96ca594a8e300d1080150f8a90301d1290150f81b6929389b0a40f9e00314aa236ca59422030012e0031baa010080522a160994",
-        "replacement": "f40316aa20008092410100107c67a594800000b4f00300aae00316aa00023fd61a5ea5940840601ef39401b02a0000145754427269646765416374697661746500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-        "patched_text_sha256": "ef4251b028ac92adfeaab8769322554178727c5a3f709b222ccc5346336b04ba"
+        "replacement": "f40316aa20008092610200107c67a594800000b4f00300aae00316aa00023fd6689101f008f142f91f0500b1c0000054609101f000801791a11100f0218017913a6ca594115ea5940840601ef39401b0210000145754427269646765416374697661746500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "patched_text_sha256": "b9f09bb47ff01351a95fc5bd5eeea5afdf23f160a68cef5c3d0b9b5e17ea8da2"
       }
     ]
   },
@@ -64,5 +64,5 @@
       }
     }
   },
-  "review_notes": "arm64 2.2.3 (657): original executable and __text fingerprints verified. isDefaultASCIIMode final return forced false: getter and native mode actions share G.setting.isASCIIMode, so changing controllers does not implicitly select another app state. resetInputMode returns immediately, covering activation timeout, input-source synchronization and settings reset calls. activateServer mode block 0x1001187ac..0x100118880 calls WTBridgeActivate once with x22 (current controller) through host dlsym stub 0x102a725a8; preserves time in d8 and G.setting page in x19 for the continuation. Original activation still creates sessions, sets current controller, updates the menu and canInput state. currentInputController.didSet only compares modes and updates the tips-shown flag, not the mode. x86_64 retained for source identification only. Live installation tests pending."
+  "review_notes": "arm64 2.2.3 (657): original executable and __text fingerprints verified. isDefaultASCIIMode final return forced false: getter and native mode actions share G.setting.isASCIIMode, so changing controllers does not implicitly select another app state. resetInputMode returns immediately, covering activation timeout, input-source synchronization and settings reset calls. activateServer mode block 0x1001187ac..0x100118880 calls WTBridgeActivate once with x22 (current controller) through host dlsym stub 0x102a725a8; then preserves the original G.setting_Wz check and swift_once initialization before maintaining time in d8 and the G.setting page in x19 for the continuation. Original activation still creates sessions, sets current controller, updates the menu and canInput state. currentInputController.didSet only compares modes and updates the tips-shown flag, not the mode. x86_64 retained for source identification only. Live installation tests pending."
 }
