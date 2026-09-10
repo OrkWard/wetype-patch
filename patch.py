@@ -7,6 +7,7 @@ import json
 import os
 import plistlib
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -15,13 +16,15 @@ import macho
 import version_profile
 
 ROOT = Path(__file__).resolve().parent
-PATCH_VERSION = '1.1.0'
+PATCH_VERSION = '1.3.0'
 TARGET_ARCHES = {'arm64'}
 ENGLISH_ID = 'com.tencent.inputmethod.wetype.english'
 ENGLISH_NAME = '微信输入法'
-FORCE_DEFAULT_ASCII_SYMBOL = '_$s6WeType9InputModeV18isDefaultASCIIMode8bundleIDSbSS_tFZTf4nd_n'
-FORCE_DEFAULT_ASCII_ORIGINAL = bytes.fromhex('60020012')  # and w0, w19, #1
-FORCE_DEFAULT_ASCII_REPLACEMENT = bytes.fromhex('20008052')  # mov w0, #1
+REVIEWED_PATCH_SITES = {
+    ('global_mode', '_$s6WeType9InputModeV18isDefaultASCIIMode8bundleIDSbSS_tFZTf4nd_n', 0x100360728),
+    ('disable_mode_reset', '_$s6WeType9InputModeV05resetcD0yyFZTf4d_n', 0x100360778),
+    ('native_activation', '_$s6WeType15InputControllerC14activateServeryyypSgF', 0x1001187ac),
+}
 
 
 def run(*args):
@@ -91,6 +94,13 @@ def add_english(app):
 
 
 def compile_tools(work, app, profile):
+    activation = work / 'activation.o'
+    run('xcrun', 'clang', '-arch', 'arm64', '-c', ROOT / 'src/activation-arm64.s', '-o', activation)
+    words = run('xcrun', 'otool', '-s', '__TEXT', '__text', activation).decode().splitlines()[2:]
+    code = b''.join(struct.pack('<I', int(word, 16)) for line in words for word in line.split()[1:])
+    reviewed = next(item for item in profile['code_patches']['arm64'] if item['name'] == 'native_activation')
+    if code != bytes.fromhex(reviewed['replacement']):
+        raise ValueError('Activation assembly differs from reviewed code patch')
     (work / 'state-profile.h').write_text(version_profile.header(profile), encoding='utf-8')
     targets = {
         'libwetype-bridge.dylib': (['bridge.m', 'state.m'], ['-dynamiclib', '-Wl,-install_name,' + macho.LOAD_PATH],
@@ -116,6 +126,10 @@ def code_patches(profile, arch):
     patches = profile.get('code_patches', {}).get(arch, [])
     if not isinstance(patches, list):
         raise ValueError(f'Invalid code patches for {arch}')
+    if arch == 'arm64' and (len(patches) != 3 or
+            {item.get('name') for item in patches if isinstance(item, dict)} !=
+            {'global_mode', 'disable_mode_reset', 'native_activation'}):
+        raise ValueError('This bridge requires the three reviewed native-mode patches')
     result = []
     for item in patches:
         if (not isinstance(item, dict) or set(item) != {'name', 'symbol', 'address', 'original',
@@ -130,9 +144,7 @@ def code_patches(profile, arch):
             raise ValueError(f'Invalid code-patch bytes for {arch}') from error
         if not original or len(original) != len(replacement) or len(original) % 4:
             raise ValueError(f'Invalid code-patch width for {arch}')
-        if (arch != 'arm64' or item['name'] != 'force_default_ascii' or
-            item['symbol'] != FORCE_DEFAULT_ASCII_SYMBOL or original != FORCE_DEFAULT_ASCII_ORIGINAL or
-            replacement != FORCE_DEFAULT_ASCII_REPLACEMENT):
+        if arch != 'arm64' or (item['name'], item['symbol'], item['address']) not in REVIEWED_PATCH_SITES:
             raise ValueError(f'Unsupported reviewed code patch for {arch}')
         digest = item['patched_text_sha256']
         if not isinstance(digest, str) or len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
@@ -231,10 +243,10 @@ def verify(app, expected=None):
     english = ENGLISH_ID in modes
     if english and modes[ENGLISH_ID]['TISIntendedLanguage'] != 'en':
         raise ValueError('Incorrect English-entry language')
-    forced_ascii = any(item[0]['name'] == 'force_default_ascii' for arch in target_arches
-                       for item in code_patches(expected, arch))
+    for arch in target_arches:
+        code_patches(expected, arch)
     return {'verified': True, 'tool_version': PATCH_VERSION, 'architectures': sorted(target_arches),
-            'english_entry': english, 'force_default_ascii': forced_ascii,
+            'english_entry': english, 'native_mode_decision': True,
             'note': 'Ad-hoc integrity/static checks only; live input tests are separate.'}
 
 

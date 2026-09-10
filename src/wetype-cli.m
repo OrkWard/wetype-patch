@@ -28,6 +28,7 @@ int main(int argc, const char **argv) {
             fputs(usage, stdout);
             printf("Bridge %s for %s.\nApp modes are remembered automatically; unseen apps default to English.\n"
                 "chinese/english are idempotent and affect the current WeType session only.\n"
+                "app-set pins an app's entry mode; app-forget removes the rule and uses remembered mode.\n"
                 "Requires patched WeType to be running. stop disables IPC until host restart.\n",
                 WTBridgeVersion.UTF8String, WTBundleID.UTF8String);
             return 0;

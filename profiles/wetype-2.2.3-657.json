@@ -15,12 +15,28 @@
   "code_patches": {
     "arm64": [
       {
-        "name": "force_default_ascii",
+        "name": "global_mode",
         "symbol": "_$s6WeType9InputModeV18isDefaultASCIIMode8bundleIDSbSS_tFZTf4nd_n",
         "address": 4298508072,
         "original": "60020012",
-        "replacement": "20008052",
-        "patched_text_sha256": "1d734dcade1e7f58e5e6da7758b722f8c1ac0e122bc6550a730d2a66a3589825"
+        "replacement": "00008052",
+        "patched_text_sha256": "ef4251b028ac92adfeaab8769322554178727c5a3f709b222ccc5346336b04ba"
+      },
+      {
+        "name": "disable_mode_reset",
+        "symbol": "_$s6WeType9InputModeV05resetcD0yyFZTf4d_n",
+        "address": 4298508152,
+        "original": "fc6fbaa9",
+        "replacement": "c0035fd6",
+        "patched_text_sha256": "ef4251b028ac92adfeaab8769322554178727c5a3f709b222ccc5346336b04ba"
+      },
+      {
+        "name": "native_activation",
+        "symbol": "_$s6WeType15InputControllerC14activateServeryyypSgF",
+        "address": 4296116140,
+        "original": "f40316aa67140094fb0300aa1f5ea5940840601e689101f008f142f91f0500b161360054f39401b0683244f9002d40fd0039601e0800c4d28813e8f20101679e0020611e8d040054e11f0994f40316aa5414009408000012690300123f01086ba0030054f90300aae00315aac56ca594f40300aa200200b53b00805220008052812d8c52412faf720280fcd2f40316aae0f7ff97f40300aae00315aae10314aaa96ca594a8e300d1080150f8a90301d1290150f81b6929389b0a40f9e00314aa236ca59422030012e0031baa010080522a160994",
+        "replacement": "f40316aa20008092410100107c67a594800000b4f00300aae00316aa00023fd61a5ea5940840601ef39401b02a0000145754427269646765416374697661746500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "patched_text_sha256": "ef4251b028ac92adfeaab8769322554178727c5a3f709b222ccc5346336b04ba"
       }
     ]
   },
@@ -48,5 +64,5 @@
       }
     }
   },
-  "review_notes": "arm64 static review: currentASCIIMode uses Swift self x20, per-client InputMode.states with G.setting fallback; currentInputController initialized by swift_unknownObjectWeakInit and loaded through swift_unknownObjectWeakLoadStrong after swift_once token -1; AppDelegate ObjC void action reads this getter, inverts it, and synchronously calls InputMode.changeInputMode. isDefaultASCIIMode(bundleID:) has one return at 0x100360728; replacing its final AND with MOV W0,#1 preserves the function body and forces every newly created session's default to English. x86_64 retained for source identification only, not delivery. System installation at /Library/Input Methods/WeType.app is required by the original main() path check. Real arm64 English-entry session passed idempotent chinese/english and toggle; stop and normal restart restored IPC. Automatic per-app restoration and the force-default patch still require live testing."
+  "review_notes": "arm64 2.2.3 (657): original executable and __text fingerprints verified. isDefaultASCIIMode final return forced false: getter and native mode actions share G.setting.isASCIIMode, so changing controllers does not implicitly select another app state. resetInputMode returns immediately, covering activation timeout, input-source synchronization and settings reset calls. activateServer mode block 0x1001187ac..0x100118880 calls WTBridgeActivate once with x22 (current controller) through host dlsym stub 0x102a725a8; preserves time in d8 and G.setting page in x19 for the continuation. Original activation still creates sessions, sets current controller, updates the menu and canInput state. currentInputController.didSet only compares modes and updates the tips-shown flag, not the mode. x86_64 retained for source identification only. Live installation tests pending."
 }

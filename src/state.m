@@ -1,4 +1,5 @@
 #import <AppKit/AppKit.h>
+#import <InputMethodKit/InputMethodKit.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <mach-o/dyld.h>
 #import <mach-o/getsect.h>
@@ -62,6 +63,10 @@ static id currentController(void) {
 
 BOOL WTIsCurrentController(id controller) {
     return controller && currentController() == controller;
+}
+
+NSString *WTBundleForController(id controller) {
+    return [[(IMKInputController *)controller client] bundleIdentifier];
 }
 
 BOOL WTReadModeForController(id controller, BOOL *ascii, NSString **error) {

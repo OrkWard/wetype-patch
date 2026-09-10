@@ -8,35 +8,24 @@
 
 static NSString * const WTAutoDefaultsSuite = @"local.orkward.wetype.patch";
 static NSString * const WTAppModesKey = @"appModes";
+static NSString * const WTFixedAppModesKey = @"fixedAppModes";
 static NSString * const WTAutoEnabledKey = @"automaticModeManagement";
-static const NSTimeInterval WTEnforcementWindow = 2.0;
 
 @interface WTLabBridge : NSObject
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *replies;
 @property(nonatomic, strong) NSMutableArray<NSString *> *order;
 @property(nonatomic, strong) NSUserDefaults *autoDefaults;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *appModes;
-@property(nonatomic, strong) NSTimer *modeTimer;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *fixedAppModes;
 @property(nonatomic, copy) NSString *frontBundle;
-@property(nonatomic, copy) NSString *pendingBundle;
-@property(nonatomic) BOOL pendingDesiredASCII;
-@property(nonatomic) NSTimeInterval pendingEnforceUntil;
-@property(nonatomic, weak) id blockedController;
-@property(nonatomic, weak) id lastController;
-@property(nonatomic, weak) id unsafeController;
-@property(nonatomic) BOOL waitForNewController;
-@property(nonatomic) BOOL transitioning;
 @property(nonatomic) BOOL automaticModeManagement;
 @property(nonatomic) BOOL stopped;
 - (void)receive:(NSNotification *)notification;
 - (void)processRequest:(NSDictionary *)request;
 - (void)emitReply:(NSDictionary *)reply;
 - (void)startAutomaticModeManagement;
-- (void)stopAutomaticModeManagement;
-- (void)workspaceDidActivate:(NSNotification *)notification;
-- (void)workspaceDidDeactivate:(NSNotification *)notification;
-- (void)checkAutomaticMode:(NSTimer *)timer;
-- (void)beginRestoreForBundle:(NSString *)bundle waitForNewController:(BOOL)wait;
+- (void)activateController:(id)controller;
+- (void)restoreCurrentMode;
 - (void)rememberASCII:(BOOL)ascii forBundle:(NSString *)bundle;
 - (NSDictionary *)automaticStatus;
 - (void)recordExplicitASCII:(BOOL)ascii controller:(id)controller;
@@ -87,114 +76,51 @@ static NSDictionary *sourceInfo(void) {
     self.appModes[bundle] = mode;
     [self.autoDefaults setObject:[self.appModes copy] forKey:WTAppModesKey];
 }
-- (void)beginRestoreForBundle:(NSString *)bundle waitForNewController:(BOOL)wait {
-    if (!self.automaticModeManagement || !bundle.length) return;
-    self.pendingBundle = bundle;
-    self.pendingDesiredASCII = ![self.appModes[bundle] isEqualToString:@"chinese"];
-    self.pendingEnforceUntil = 0;
-    self.waitForNewController = wait;
-    self.unsafeController = nil;
-}
-- (void)workspaceDidDeactivate:(NSNotification *)notification {
-    if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [self workspaceDidDeactivate:notification]; });
-        return;
-    }
-    NSRunningApplication *application = notification.userInfo[NSWorkspaceApplicationKey];
-    if (self.frontBundle.length && [application.bundleIdentifier isEqualToString:self.frontBundle]) {
-        // The timer has already recorded the last stable value. Do not read here:
-        // IMK may have moved currentInputController to the next app before this callback.
-        self.blockedController = self.lastController;
-        self.transitioning = YES;
-    }
-}
-- (void)workspaceDidActivate:(NSNotification *)notification {
-    if (![NSThread isMainThread]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [self workspaceDidActivate:notification]; });
-        return;
-    }
-    NSRunningApplication *application = notification.userInfo[NSWorkspaceApplicationKey];
-    NSString *bundle = application.bundleIdentifier;
-    if (!bundle.length) return;
+- (void)activateController:(id)controller {
+    if (self.stopped || ![NSThread isMainThread] || !WTIsCurrentController(controller)) return;
+    NSString *bundle = WTBundleForController(controller);
+    if (!bundle.length || [bundle isEqualToString:self.frontBundle]) return;
+    BOOL ascii = NO;
+    if (!WTReadModeForController(controller, &ascii, NULL)) return;
+    // All clients read the same native mode. It is still the outgoing app's
+    // value here; changing currentInputController no longer selects another mode.
+    if (self.automaticModeManagement) [self rememberASCII:ascii forBundle:self.frontBundle];
     self.frontBundle = bundle;
-    self.transitioning = NO;
-    [self beginRestoreForBundle:bundle waitForNewController:self.blockedController != nil];
+    [self restoreCurrentMode];
 }
-- (void)checkAutomaticMode:(NSTimer *)timer {
-    (void)timer;
-    if (!self.automaticModeManagement || self.transitioning || self.stopped) return;
-    NSString *actualBundle = NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier;
-    if (actualBundle.length && ![actualBundle isEqualToString:self.frontBundle]) {
-        self.blockedController = self.lastController;
-        self.frontBundle = actualBundle;
-        [self beginRestoreForBundle:actualBundle waitForNewController:self.blockedController != nil];
-    }
-    if (!self.frontBundle.length || ![sourceInfo()[@"activeWeType"] boolValue]) return;
+- (void)restoreCurrentMode {
+    if (!self.automaticModeManagement || self.stopped || !self.frontBundle.length) return;
+    NSDictionary *source = sourceInfo();
+    if (![source[@"activeWeType"] boolValue]) return;
     id controller = nil;
     BOOL ascii = NO;
-    NSString *stateError = nil;
-    if (!WTReadMode(&controller, &ascii, &stateError)) return;
-    if (self.pendingBundle) {
-        if (![self.pendingBundle isEqualToString:self.frontBundle]) {
-            [self beginRestoreForBundle:self.frontBundle waitForNewController:NO];
-        }
-        if (self.waitForNewController && self.blockedController && controller == self.blockedController) return;
-        self.waitForNewController = NO;
-        self.blockedController = nil;
-        if (self.lastController != controller) self.unsafeController = nil;
-        self.lastController = controller;
-        NSTimeInterval now = NSDate.date.timeIntervalSince1970;
-        if (self.pendingEnforceUntil == 0) self.pendingEnforceUntil = now + WTEnforcementWindow;
-        if (ascii != self.pendingDesiredASCII && self.unsafeController != controller) {
-            id delegate = NSApp.delegate;
-            SEL selector = NSSelectorFromString(@"changeInputMode");
-            NSDictionary *sourceBefore = sourceInfo();
-            NSString *inputSource = sourceBefore[@"inputSource"];
-            if (![sourceBefore[@"activeWeType"] boolValue] || !actionAvailable(delegate) ||
-                !WTIsCurrentController(controller)) return;
-            ((void (*)(id, SEL))objc_msgSend)(delegate, selector);
-            BOOL after = NO;
-            BOOL verified = WTReadModeForController(controller, &after, &stateError) &&
-                [sourceInfo()[@"inputSource"] isEqual:inputSource];
-            if (!verified) {
-                // The action ran but its outcome is unknown. Never blindly toggle this controller again.
-                self.unsafeController = controller;
-                NSLog(@"[WeTypeBridge] automatic mode result unknown for %@: %@", self.frontBundle,
-                    stateError ?: @"input target changed");
-                return;
-            }
-            ascii = after;
-        }
-        if (ascii == self.pendingDesiredASCII && now >= self.pendingEnforceUntil) {
-            [self rememberASCII:ascii forBundle:self.frontBundle];
-            self.pendingBundle = nil;
-            self.pendingEnforceUntil = 0;
-            self.unsafeController = nil;
-        }
-        return;
+    NSString *error = nil;
+    if (!WTReadMode(&controller, &ascii, &error) ||
+        ![WTBundleForController(controller) isEqualToString:self.frontBundle]) return;
+    NSString *mode = self.fixedAppModes[self.frontBundle] ?: self.appModes[self.frontBundle];
+    BOOL desired = ![mode isEqualToString:@"chinese"];
+    if (ascii == desired) return;
+    id delegate = NSApp.delegate;
+    if (!actionAvailable(delegate) || !WTIsCurrentController(controller) ||
+        ![sourceInfo()[@"inputSource"] isEqual:source[@"inputSource"]]) return;
+    ((void (*)(id, SEL))objc_msgSend)(delegate, NSSelectorFromString(@"changeInputMode"));
+    BOOL after = NO;
+    if (!WTReadModeForController(controller, &after, &error) || after != desired ||
+        ![sourceInfo()[@"inputSource"] isEqual:source[@"inputSource"]]) {
+        NSLog(@"[WeTypeBridge] mode result unknown for %@: %@", self.frontBundle,
+            error ?: @"target state not verified");
     }
-    if (controller != self.lastController) {
-        // A new WeType input session can apply the vendor's own default-app rule.
-        // Restore our remembered value before accepting any state from that session.
-        self.lastController = controller;
-        [self beginRestoreForBundle:self.frontBundle waitForNewController:NO];
-        return;
-    }
-    [self rememberASCII:ascii forBundle:self.frontBundle];
+    // The application has already been recorded above. Never retry this activation.
 }
 - (NSDictionary *)automaticStatus {
     return @{ @"automaticModeManagement": @(self.automaticModeManagement),
         @"defaultMode": @"english", @"frontmostBundle": self.frontBundle ?: @"",
-        @"pendingBundle": self.pendingBundle ?: @"", @"appModes": [self.appModes copy] ?: @{} };
+        @"appModes": [self.appModes copy] ?: @{},
+        @"fixedAppModes": [self.fixedAppModes copy] ?: @{} };
 }
 - (void)recordExplicitASCII:(BOOL)ascii controller:(id)controller {
-    if (!self.automaticModeManagement || !self.frontBundle.length || !controller) return;
-    self.lastController = controller;
-    self.blockedController = nil;
-    self.unsafeController = nil;
-    self.pendingBundle = nil;
-    self.pendingEnforceUntil = 0;
-    [self rememberASCII:ascii forBundle:self.frontBundle];
+    if (!self.automaticModeManagement || !controller) return;
+    [self rememberASCII:ascii forBundle:WTBundleForController(controller)];
 }
 - (void)startAutomaticModeManagement {
     self.autoDefaults = [[NSUserDefaults alloc] initWithSuiteName:WTAutoDefaultsSuite];
@@ -205,22 +131,15 @@ static NSDictionary *sourceInfo(void) {
         if ([key isKindOfClass:[NSString class]] && [key length] > 0 &&
             ([value isEqual:@"chinese"] || [value isEqual:@"english"])) self.appModes[key] = value;
     }];
+    self.fixedAppModes = [NSMutableDictionary dictionary];
+    NSDictionary *fixedModes = [self.autoDefaults dictionaryForKey:WTFixedAppModesKey];
+    [fixedModes enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
+        (void)stop;
+        if ([key isKindOfClass:[NSString class]] && [key length] > 0 &&
+            ([value isEqual:@"chinese"] || [value isEqual:@"english"])) self.fixedAppModes[key] = value;
+    }];
     id enabled = [self.autoDefaults objectForKey:WTAutoEnabledKey];
     self.automaticModeManagement = enabled ? [enabled boolValue] : YES;
-    NSNotificationCenter *workspaceCenter = NSWorkspace.sharedWorkspace.notificationCenter;
-    [workspaceCenter addObserver:self selector:@selector(workspaceDidActivate:)
-        name:NSWorkspaceDidActivateApplicationNotification object:nil];
-    [workspaceCenter addObserver:self selector:@selector(workspaceDidDeactivate:)
-        name:NSWorkspaceDidDeactivateApplicationNotification object:nil];
-    self.frontBundle = NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier;
-    [self beginRestoreForBundle:self.frontBundle waitForNewController:NO];
-    self.modeTimer = [NSTimer scheduledTimerWithTimeInterval:0.2 target:self
-        selector:@selector(checkAutomaticMode:) userInfo:nil repeats:YES];
-}
-- (void)stopAutomaticModeManagement {
-    [self.modeTimer invalidate];
-    self.modeTimer = nil;
-    [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
 }
 - (void)emitReply:(NSDictionary *)reply {
     [[NSDistributedNotificationCenter defaultCenter] postNotificationName:WTReplyName object:nil
@@ -258,10 +177,7 @@ static NSDictionary *sourceInfo(void) {
         if ([operation isEqualToString:@"auto-on"] || [operation isEqualToString:@"auto-off"]) {
             self.automaticModeManagement = [operation isEqualToString:@"auto-on"];
             [self.autoDefaults setBool:self.automaticModeManagement forKey:WTAutoEnabledKey];
-            if (self.automaticModeManagement)
-                [self beginRestoreForBundle:self.frontBundle waitForNewController:NO];
-            else
-                self.pendingBundle = nil;
+            if (self.automaticModeManagement) [self restoreCurrentMode];
         }
         [reply addEntriesFromDictionary:[self automaticStatus]];
         reply[@"ok"] = @YES;
@@ -275,13 +191,13 @@ static NSDictionary *sourceInfo(void) {
             reply[@"error"] = @"Mode must be chinese or english";
         } else {
             if ([operation isEqualToString:@"app-forget"]) {
-                [self.appModes removeObjectForKey:bundle];
-                [self.autoDefaults setObject:[self.appModes copy] forKey:WTAppModesKey];
+                [self.fixedAppModes removeObjectForKey:bundle];
             } else {
-                [self rememberASCII:[mode isEqualToString:@"english"] forBundle:bundle];
+                self.fixedAppModes[bundle] = mode;
             }
+            [self.autoDefaults setObject:[self.fixedAppModes copy] forKey:WTFixedAppModesKey];
             if ([bundle isEqualToString:self.frontBundle])
-                [self beginRestoreForBundle:bundle waitForNewController:NO];
+                [self restoreCurrentMode];
             [reply addEntriesFromDictionary:[self automaticStatus]];
             reply[@"configuredBundle"] = bundle;
             reply[@"ok"] = @YES;
@@ -355,9 +271,7 @@ static NSDictionary *sourceInfo(void) {
     [self emitReply:reply];
     if ([operation isEqualToString:@"stop"] && [reply[@"ok"] boolValue]) {
         self.stopped = YES;
-        [self stopAutomaticModeManagement];
         [center removeObserver:self];
-        bridge = nil;
     }
 }
 @end
@@ -379,6 +293,14 @@ int WTBridgeStart(void) {
     [[NSDistributedNotificationCenter defaultCenter] addObserver:bridge selector:@selector(receive:)
         name:WTRequestName object:nil suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
     return 0;
+}
+
+// Called synchronously by the patched mode-decision block in activateServer.
+__attribute__((visibility("default")))
+void WTBridgeActivate(id controller) {
+    if (![NSThread isMainThread]) return;
+    if (!bridge && WTBridgeStart() != 0) return;
+    [bridge activateController:controller];
 }
 
 #ifndef WT_BRIDGE_TESTING
