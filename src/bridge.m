@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <Carbon/Carbon.h>
+#import <InputMethodKit/InputMethodKit.h>
 #import <objc/message.h>
 #include <math.h>
 #include <unistd.h>
@@ -228,6 +229,8 @@ static NSDictionary *sourceInfo(void) {
                     ![sourceInfo()[@"inputSource"] isEqual:reply[@"inputSource"]]) {
                     reply[@"error"] = @"Input target/action changed before operation";
                 } else if (before == desired) {
+                    // An explicit set also finishes preedit without toggling the mode.
+                    [(IMKInputController *)controller commitComposition:[(IMKInputController *)controller client]];
                     reply[@"ok"] = @YES;
                     reply[@"changed"] = @NO;
                     reply[@"actionInvoked"] = @NO;
@@ -235,6 +238,7 @@ static NSDictionary *sourceInfo(void) {
                 } else {
                     // Read/compare/action/verify are serialized on the main queue.
                     // A set request already in its desired mode NEVER calls toggle.
+                    [(IMKInputController *)controller commitComposition:[(IMKInputController *)controller client]];
                     reply[@"actionInvoked"] = @YES;
                     ((void (*)(id, SEL))objc_msgSend)(delegate, selector);
                     BOOL after = NO;
