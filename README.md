@@ -1,6 +1,6 @@
 # WeType patch 维护
 
-目标：WeType 2.2.3 (657)，产物仅 arm64，桥版本 1.3.0，IPC 协议仍为 v1。
+目标：WeType 2.2.3 (657)，产物仅 arm64，桥版本 1.3.1，IPC 协议仍为 v1。
 安装路径：`/Library/Input Methods/WeType.app`。
 - `patch.py`：构建、校验及新增英语入口。
 - `macho.py`：在现有 header padding 中增加动态库加载命令。
@@ -41,7 +41,7 @@ APP='/Library/Input Methods/WeType.app'
 
 `app-set BUNDLE_ID chinese|english` 写入独立的 `fixedAppModes` 固定配置，每次切入该应用优先使用，不会被手动切换或记忆更新覆盖。`app-forget BUNDLE_ID` 删除固定配置，恢复使用 `appModes` 记忆，没有记忆则使用英文。旧版本的记忆保持原样，不自动转换为固定配置。
 
-`chinese/english` 已是目标模式则不切换，否则调用一次原动作并复查，同时更新当前应用记忆。`stop` 关闭 IPC，下次宿主启动恢复。
+`chinese/english` 已是目标模式则不切换，否则调用一次原动作并复查，同时更新当前应用记忆。自动恢复和 CLI 切换确认模式改变后，在光标旁播放原生中英文图标的翻转淡出动画；同模式设置、失败、结果不明、重复请求不播放。`app-set` / `app-forget` / `auto-on` 导致的实际模式改变同样播放。原生快捷键的动画保持原样，不额外挂钩或叠加。动画只是提示，不等待动画结束、不拦截输入；原生无法取得光标位置时可能不显示，不重试。`stop` 关闭 IPC，下次宿主启动恢复。
 仅控制当前 WeType 会话，不自动选择其他系统输入源，不改 Shift 或 Caps Lock。
 `status.ok` 只表示桥响应，模式还要看 `stateKnown` / `mode`。无会话时拒绝设置。
 退出码：0 成功；1 拒绝/结果不明；2 参数错误；3 超时。超时不要盲目重试 toggle。
@@ -92,12 +92,21 @@ _$s6WeType11AppDelegateC15changeInputModeyyFTo
 确认原 getter 的全局回退、weak 存储/token、返回值含义、toggle 副作用。还要核查 ASCII 判断的全部调用点、模式重置的调用点及激活段的寄存器约定。当前三处补丁仅适配 2.2.3 (657)，旧 profile 不能用于构建这个版本的桥。
 
 `state.m` 使用 Swift weak runtime 取得控制器强引用，Clang `swiftcall` / `swift_context` 以 x20 传 self，不能改成普通 C ABI。
+动画新增三个 profile 审核符号：`InputController.session` getter、`InputSession.sessionID` getter、特化的 `Toast.showInputModeTips`。session getter 返回 +1 Swift 对象，用 `swift_release` 平衡，不能交给 ObjC ARC。arm64 提示函数参数为 x0=sessionID、w1=枚举 0（中英文）、w2=英文 Bool，特化入口已移除 metatype 参数。地址、枚举、所有权和 ABI 均须随版本重新审核。原生 `AppDelegate.changeInputMode` 不播放该动画，桥只在确认成功后补一次；不替换原生快捷键入口。
 初始化 token 必须为 -1；运行时先核对版本与整个 __text 哈希，再用符号地址加 ASLR slide。
 调用原 ObjC `changeInputMode`，不写 Boolean，不手工解码 Swift Dictionary。
 getter 可能触发原厂创建会话；没有当前控制器时不猜状态。
 
 padding 不足、非零、未知 Mach-O 命令或指纹不符时停止，不自动挪 section 或删命令腾空间。
 适配后真实测试：TextEdit 中保持焦点，中文两次→英文两次→中文两次；核对第二次不切换，并检查实际文字/候选、跨应用记忆和新 PID 的自动加载。
+
+## 自动测试
+
+```sh
+python3 -B tests/run.py
+```
+
+mock 测试覆盖自动/CLI 切换、同模式、重复请求、目标或输入源变化、未知结果、动画异常隔离；同时编译生产桥。测试不启动宿主、不修改偏好或安装包。实际光标定位、图标和翻转效果仍需安装后检查：中→英→中、跨应用恢复、相同模式不重复、原生快捷键不叠加。
 
 ## 已知边界
 

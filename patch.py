@@ -16,7 +16,7 @@ import macho
 import version_profile
 
 ROOT = Path(__file__).resolve().parent
-PATCH_VERSION = '1.3.0'
+PATCH_VERSION = '1.3.1'
 TARGET_ARCHES = {'arm64'}
 ENGLISH_ID = 'com.tencent.inputmethod.wetype.english'
 ENGLISH_NAME = '微信输入法'

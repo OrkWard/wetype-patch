@@ -10,6 +10,9 @@ SYMBOLS = {
     'controller_slot': '_$s6WeType1GV22currentInputControllerAA0dE0CSgvpZ',
     'controller_init_token': '_$s6WeType1GV22currentInputController_Wz',
     'toggle_action': '_$s6WeType11AppDelegateC15changeInputModeyyFTo',
+    'session_getter': '_$s6WeType15InputControllerC7sessionAA0C7SessionCvg',
+    'session_id_getter': '_$s6WeType12InputSessionC9sessionIDSuvg',
+    'mode_tips': '_$s6WeType5ToastC17showInputModeTips_4type11isASCIIModeySu_AC0efB0OSbtFZTf4nnnd_n',
 }
 
 
@@ -55,7 +58,7 @@ def inspect(app):
         if set(addresses) != set(SYMBOLS):
             raise ValueError(f"Missing private symbols in {part['arch']}; do not guess offsets")
         text = next(s for s in part['sections'] if s['segment'] == '__TEXT' and s['section'] == '__text')
-        for key in ('getter', 'toggle_action'):
+        for key in ('getter', 'toggle_action', 'session_getter', 'session_id_getter', 'mode_tips'):
             if not text['address'] <= addresses[key] < text['address'] + text['size']:
                 raise ValueError(f'{key} not inside __text')
         result['architectures'][part['arch']] = {
@@ -95,7 +98,10 @@ def header(reviewed):
     for i, (arch, part) in enumerate(sorted(reviewed['architectures'].items())):
         lines.append(('#if' if i == 0 else '#elif') + f' defined(__{arch}__)')
         for key, macro in [('getter', 'WT_GETTER_ADDRESS'), ('controller_slot', 'WT_CONTROLLER_SLOT'),
-                           ('controller_init_token', 'WT_CONTROLLER_INIT_TOKEN')]:
+                           ('controller_init_token', 'WT_CONTROLLER_INIT_TOKEN'),
+                           ('session_getter', 'WT_SESSION_GETTER_ADDRESS'),
+                           ('session_id_getter', 'WT_SESSION_ID_GETTER_ADDRESS'),
+                           ('mode_tips', 'WT_MODE_TIPS_ADDRESS')]:
             lines.append(f'#define {macro} UINT64_C({part["addresses"][key]:#x})')
         patches = reviewed.get('code_patches', {}).get(arch, [])
         text_sha256 = patches[0]['patched_text_sha256'] if patches else part['text_sha256']

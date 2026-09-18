@@ -10,7 +10,10 @@
     "getter": "_$s6WeType15InputControllerC16currentASCIIModeSbvg",
     "controller_slot": "_$s6WeType1GV22currentInputControllerAA0dE0CSgvpZ",
     "controller_init_token": "_$s6WeType1GV22currentInputController_Wz",
-    "toggle_action": "_$s6WeType11AppDelegateC15changeInputModeyyFTo"
+    "toggle_action": "_$s6WeType11AppDelegateC15changeInputModeyyFTo",
+    "session_getter": "_$s6WeType15InputControllerC7sessionAA0C7SessionCvg",
+    "session_id_getter": "_$s6WeType12InputSessionC9sessionIDSuvg",
+    "mode_tips": "_$s6WeType5ToastC17showInputModeTips_4type11isASCIIModeySu_AC0efB0OSbtFZTf4nnnd_n"
   },
   "code_patches": {
     "arm64": [
@@ -49,7 +52,10 @@
         "getter": 4296216224,
         "toggle_action": 4296475904,
         "controller_init_token": 4332090592,
-        "controller_slot": 4332509104
+        "controller_slot": 4332509104,
+        "session_getter": 4296215632,
+        "session_id_getter": 4299057584,
+        "mode_tips": 4298816928
       }
     },
     "arm64": {
@@ -60,9 +66,12 @@
         "getter": 4296137036,
         "toggle_action": 4296371136,
         "controller_init_token": 4348737184,
-        "controller_slot": 4349188384
+        "controller_slot": 4349188384,
+        "session_getter": 4296136588,
+        "session_id_getter": 4298714168,
+        "mode_tips": 4298498340
       }
     }
   },
-  "review_notes": "arm64 2.2.3 (657): original executable and __text fingerprints verified. isDefaultASCIIMode final return forced false: getter and native mode actions share G.setting.isASCIIMode, so changing controllers does not implicitly select another app state. resetInputMode returns immediately, covering activation timeout, input-source synchronization and settings reset calls. activateServer mode block 0x1001187ac..0x100118880 calls WTBridgeActivate once with x22 (current controller) through host dlsym stub 0x102a725a8; then preserves the original G.setting_Wz check and swift_once initialization before maintaining time in d8 and the G.setting page in x19 for the continuation. Original activation still creates sessions, sets current controller, updates the menu and canInput state. currentInputController.didSet only compares modes and updates the tips-shown flag, not the mode. x86_64 retained for source identification only. Live installation tests pending."
+  "review_notes": "arm64 2.2.3 (657): original executable and __text fingerprints verified. isDefaultASCIIMode final return forced false: getter and native mode actions share G.setting.isASCIIMode, so changing controllers does not implicitly select another app state. resetInputMode returns immediately, covering activation timeout, input-source synchronization and settings reset calls. activateServer mode block 0x1001187ac..0x100118880 calls WTBridgeActivate once with x22 (current controller) through host dlsym stub 0x102a725a8; then preserves the original G.setting_Wz check and swift_once initialization before maintaining time in d8 and the G.setting page in x19 for the continuation. Original activation still creates sessions, sets current controller, updates the menu and canInput state. currentInputController.didSet only compares modes and updates the tips-shown flag, not the mode. x86_64 retained for source identification only. Mode-tip ABI reviewed for arm64: InputController.session getter (0x10011d78c) returns a +1 Swift object, balanced by swift_release; InputSession.sessionID getter (0x100392c38) takes self in x20. Specialized Toast.showInputModeTips (0x10035e124) takes sessionID in x0, UInt8 enum tag in w1 (0 = Chinese/English), Bool in w2, with dead metatype removed. Native switchInputMode at 0x1001306ac uses tag 0; Toast selects input_chinese/input_english, positions via Windows.cursorRect, then ToastWindow.show shouldFlip=true (Y rotation/fadeout). AppDelegate.changeInputMode and its global-mode setter path do not call Toast; native shortcut paths already do and are not hooked. New x86_64 symbol addresses are identification only, not an approved invocation ABI. Live installation tests pending."
 }

@@ -30,6 +30,7 @@ static NSString * const WTAutoEnabledKey = @"automaticModeManagement";
 - (void)rememberASCII:(BOOL)ascii forBundle:(NSString *)bundle;
 - (NSDictionary *)automaticStatus;
 - (void)recordExplicitASCII:(BOOL)ascii controller:(id)controller;
+- (void)showModeTipsForController:(id)controller ascii:(BOOL)ascii inputSource:(NSString *)inputSource;
 @end
 
 static WTLabBridge *bridge;
@@ -110,6 +111,8 @@ static NSDictionary *sourceInfo(void) {
         ![sourceInfo()[@"inputSource"] isEqual:source[@"inputSource"]]) {
         NSLog(@"[WeTypeBridge] mode result unknown for %@: %@", self.frontBundle,
             error ?: @"target state not verified");
+    } else {
+        [self showModeTipsForController:controller ascii:after inputSource:source[@"inputSource"]];
     }
     // The application has already been recorded above. Never retry this activation.
 }
@@ -122,6 +125,17 @@ static NSDictionary *sourceInfo(void) {
 - (void)recordExplicitASCII:(BOOL)ascii controller:(id)controller {
     if (!self.automaticModeManagement || !controller) return;
     [self rememberASCII:ascii forBundle:WTBundleForController(controller)];
+}
+- (void)showModeTipsForController:(id)controller ascii:(BOOL)ascii inputSource:(NSString *)inputSource {
+    // Cosmetic failure must never turn a successful toggle into an unknown result.
+    @try {
+        NSDictionary *source = sourceInfo();
+        if (self.stopped || ![source[@"activeWeType"] boolValue] ||
+            ![source[@"inputSource"] isEqual:inputSource] || !WTIsCurrentController(controller)) return;
+        WTShowModeTips(controller, ascii);
+    } @catch (NSException *exception) {
+        NSLog(@"[WeTypeBridge] mode tip skipped: %@", exception.name);
+    }
 }
 - (void)startAutomaticModeManagement {
     self.autoDefaults = [[NSUserDefaults alloc] initWithSuiteName:WTAutoDefaultsSuite];
@@ -250,6 +264,7 @@ static NSDictionary *sourceInfo(void) {
                         reply[@"ok"] = @YES;
                         reply[@"changed"] = after != before ? @YES : @NO;
                         [self recordExplicitASCII:after controller:controller];
+                        [self showModeTipsForController:controller ascii:after inputSource:reply[@"inputSource"]];
                     } else {
                         reply[@"error"] = stateError ?: @"Action returned but target state was not verified";
                     }
