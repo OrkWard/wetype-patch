@@ -9,9 +9,8 @@ cli := installed + "/Contents/MacOS/wetype-cli"
 default:
     @just --list
 
-# Build a new patched app; output must not already exist.
+# Build and verify in a temporary directory, then replace the output app.
 build input=input output=output profile=profile:
-    test ! -e "{{ output }}"
     mkdir -p "$(dirname "{{ output }}")"
     python3 -B patch.py build --input "{{ input }}" --output "{{ output }}" --profile "{{ profile }}" --english-entry
 

@@ -252,8 +252,8 @@ def verify(app, expected=None):
 
 def build(source, output, profile_path, english):
     source, output = source.resolve(), output.resolve()
-    if output.exists() or output.suffix != '.app' or source == output or source in output.parents:
-        raise ValueError('Output must be a NEW .app outside the source bundle')
+    if output.suffix != '.app' or source == output or source in output.parents or output in source.parents:
+        raise ValueError('Input and output must be separate, non-nested .app paths')
     if 'Input Methods' in output.parts:
         raise ValueError('Build outside Input Methods; deployment is a separate manual step')
     reviewed = json.loads(profile_path.read_text())
@@ -284,10 +284,10 @@ def build(source, output, profile_path, english):
         rights_file.write_bytes(plistlib.dumps(rights))
         run('codesign', '--force', '--sign', '-', '--options', 'runtime', '--entitlements', rights_file, '--timestamp=none', stage)
         result = verify(stage, reviewed)
-        # No overwrite: never replace an existing output or a live installation.
+        # Replace the entire old bundle only after the new build passes verification.
         if output.exists():
-            raise ValueError('Output appeared during build; refusing overwrite')
-        os.rename(stage, output)
+            shutil.rmtree(output)
+        os.replace(stage, output)
     return {'output': str(output), **result}
 
 
@@ -296,7 +296,7 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     inspect = commands.add_parser('inspect', help='Print UNREVIEWED candidate profile; no app changes')
     inspect.add_argument('app', type=Path)
-    create = commands.add_parser('build', help='Create a new self-contained patched copy, never install it')
+    create = commands.add_parser('build', help='Build a self-contained patched copy, replacing existing output; never install it')
     create.add_argument('--input', required=True, type=Path)
     create.add_argument('--output', required=True, type=Path)
     create.add_argument('--profile', required=True, type=Path)

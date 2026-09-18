@@ -1,117 +1,121 @@
-# WeType patch 维护
+# WeType patch
 
-目标：WeType 2.2.3 (657)，产物仅 arm64，桥版本 1.3.1，IPC 协议仍为 v1。
-安装路径：`/Library/Input Methods/WeType.app`。
-- `patch.py`：构建、校验及新增英语入口。
-- `macho.py`：在现有 header padding 中增加动态库加载命令。
-- `version_profile.py`、`profiles/`：识别原版、解析私有符号、检查版本指纹。
-- `src/bridge.m`、`bridge-protocol.h`：IPC 与启动初始化。
-- `src/state.m`、`state.h`：当前输入会话的模式读取。
-- `src/wetype-cli.m`：CLI。
+适用于微信输入法 **2.2.3 (657)，Apple Silicon**。
 
-## app 改动与命令
+- 按应用恢复中英文模式：固定配置 → 应用记忆 → 默认英文。
+- 支持 CLI 切换，模式改变时显示原生翻转提示。
+- 停用原厂自动模式重置，保留手动切换；新增英文输入源入口。
 
-主程序提取 arm64 slice，增加加载声明：
-`@executable_path/../Frameworks/libwetype-bridge.dylib`。另有三处 profile 审核的指令替换：
+## 构建与安装
 
-- `isDefaultASCIIMode(bundleID:)` 的统一返回值改为 false。原生 getter、菜单和快捷键统一读写全局模式，换 controller 不会先选中另一份应用模式。
-- `resetInputMode()` 直接返回，停用原厂的激活超时、输入源同步及设置通知触发的模式重置。
-- `activateServer` 的 `0x1001187ac–0x100118880` 模式处理段替换为同步调用 `WTBridgeActivate(controller)`，随后保留原版 `G.setting` 的 once 初始化和时间维护，再继续原生菜单与输入状态更新。汇编源在 `src/activation-arm64.s`，构建时校验其编译结果与 profile 一致。
-
-新增运行文件只有该 dylib 和 `Contents/MacOS/wetype-cli`。
-保留原中文入口；新增 `.english`，语言 en，显示名同为“微信输入法”。
-没有内置维护资料、receipt 或诊断工具。
+需要 Python 3、Xcode Command Line Tools 和 just。先安装官方输入法，另备一份未修改的同版本 app 作为构建输入。
 
 ```sh
-APP='/Library/Input Methods/WeType.app'
-"$APP/Contents/MacOS/wetype-cli" status
-"$APP/Contents/MacOS/wetype-cli" chinese
-"$APP/Contents/MacOS/wetype-cli" english
-"$APP/Contents/MacOS/wetype-cli" toggle
-"$APP/Contents/MacOS/wetype-cli" auto-status
-"$APP/Contents/MacOS/wetype-cli" apps
-"$APP/Contents/MacOS/wetype-cli" app-set com.apple.Terminal english
-"$APP/Contents/MacOS/wetype-cli" app-forget com.apple.Terminal
-"$APP/Contents/MacOS/wetype-cli" auto-off   # auto-on 重新开启
+just build /path/to/original/WeType.app
+# 先切到其他输入法
+just install
 ```
 
-桥复用原生输入会话激活流程，不注册应用切换通知，不轮询。目标 bundle ID 变化时，保存离开应用的模式，再按“固定配置 → 应用记忆 → 英文”决定目标模式。与当前模式相同不操作，否则调用一次原生动作。相同应用重复激活或更换 controller 不重新决策，手动切换不会被随后聚焦覆盖；动作结果不明也不重试。
+## just 命令
 
-应用记忆保存在 `~/Library/Preferences/local.orkward.wetype.patch.plist`。原生手动切换的状态在下次切入另一应用时保存；CLI 切换成功后立即保存。进程退出前尚未保存的手动变化可能丢失。`app-set`、`app-forget` 和 `auto-on` 对当前应用立即执行一次比较。`auto-off` 停用自定义恢复，保留当前全局模式，不恢复原厂分应用规则或自动重置。
-
-`app-set BUNDLE_ID chinese|english` 写入独立的 `fixedAppModes` 固定配置，每次切入该应用优先使用，不会被手动切换或记忆更新覆盖。`app-forget BUNDLE_ID` 删除固定配置，恢复使用 `appModes` 记忆，没有记忆则使用英文。旧版本的记忆保持原样，不自动转换为固定配置。
-
-`chinese/english` 已是目标模式则不切换，否则调用一次原动作并复查，同时更新当前应用记忆。自动恢复和 CLI 切换确认模式改变后，在光标旁播放原生中英文图标的翻转淡出动画；同模式设置、失败、结果不明、重复请求不播放。`app-set` / `app-forget` / `auto-on` 导致的实际模式改变同样播放。原生快捷键的动画保持原样，不额外挂钩或叠加。动画只是提示，不等待动画结束、不拦截输入；原生无法取得光标位置时可能不显示，不重试。`stop` 关闭 IPC，下次宿主启动恢复。
-仅控制当前 WeType 会话，不自动选择其他系统输入源，不改 Shift 或 Caps Lock。
-`status.ok` 只表示桥响应，模式还要看 `stateKnown` / `mode`。无会话时拒绝设置。
-退出码：0 成功；1 拒绝/结果不明；2 参数错误；3 超时。超时不要盲目重试 toggle。
-
-## 构建与更新
-
-需要 Python 3、Xcode/Command Line Tools，以及干净官方 app；不能用已 patch 的 app 作为输入。
-官方 ZIP 地址查询：`https://z.weixin.qq.com/web/mac/download?channel=InstallInfo`，读取 `zip_download_url` 下载，按 `zip_download_md5` 校验后解压。
+在项目目录运行 `just` 查看列表。除上述构建、安装外：
 
 ```sh
-cd /path/to/wetype-patch
-python3 -B patch.py build \
-  --input '/path/to/original-2.2.3-657/WeType.app' \
-  --output "$PWD/WeType.app" \
-  --profile profiles/wetype-2.2.3-657.json --english-entry
-python3 -B patch.py verify "$PWD/WeType.app"
+just verify                          # 校验构建产物
+just inspect /path/to/WeType.app      # 查看版本与符号信息
+just restart                         # 结束进程，下次聚焦时重新启动
+just status                          # 当前中英文状态
+just chinese                         # 切中文
+just english                         # 切英文
+just auto-status                     # 自动切换配置
+just auto-on                         # 开启按应用恢复
+just auto-off                        # 关闭按应用恢复
+just apps                            # 应用模式列表
+just app-set com.apple.Terminal english  # 固定应用模式
+just app-forget com.apple.Terminal    # 删除固定配置，恢复应用记忆
 ```
 
-也可通过 `just build input=/path/to/original/WeType.app` 构建，`just install` 完整替换系统 app 并重启进程；只有 install recipe 使用 sudo。
+## CLI 命令
 
-其他维护者把 input 换成自己的干净原版。输出必须不存在，不能直接构建到 Input Methods。
-verify 使用外部 profile；只证明签名完整性、原代码加审核指令补丁后的哈希、加载命令和依赖满足检查，不能替代真实输入测试。
-
-正常更新：准备并校验完整新包 → 先选其他输入法、停止旧进程 → 替换原路径的整个 app 目录 → 正常启动。
-**同一路径、bundle ID 和入口 ID 不变时，不重复注册。** 临时目录用完删除，不混合覆盖新旧文件。
-2.2.3 原厂只接受 `/Library/Input Methods/WeType.app`，用户目录会被拒绝。可先由当前用户把新包复制到 `/private/tmp`，再由管理员移入系统目录，完成后清理临时文件。
-首次安装后在系统设置中添加入口；缓存未更新时重新登录，不循环强制注册。
-
-## 新版本适配
+先选中微信输入法并聚焦输入框：
 
 ```sh
-python3 -B patch.py inspect '/path/to/new/WeType.app' > profiles/new-candidate.json
+CLI='/Library/Input Methods/WeType.app/Contents/MacOS/wetype-cli'
+"$CLI" status
+"$CLI" chinese
+"$CLI" english
+"$CLI" toggle
+"$CLI" auto-status
+"$CLI" auto-on
+"$CLI" auto-off
+"$CLI" apps
+"$CLI" app-set com.apple.Terminal english
+"$CLI" app-forget com.apple.Terminal
+"$CLI" stop
 ```
 
-候选默认 `reviewed=false`。必须核查私有接口后再批准；不能只改版本号/哈希。旧 profile 不覆盖。
-原版可能是 universal，profile 保留其识别信息，但当前只构建 arm64。
+- `chinese/english` 已是目标模式时不切换；只控制当前 WeType 会话，不选择其他系统输入源。
+- `app-set BUNDLE_ID chinese|english` 固定应用模式，不被手动切换或记忆覆盖；`app-forget` 删除固定配置，恢复应用记忆。
+- `auto-off` 保留当前模式，停用应用恢复；`stop` 同时停用 IPC 和应用恢复，宿主重启后恢复，原生手动切换不受影响。
+- `status.ok` 只表示桥响应，实际模式看 `stateKnown` / `mode`。退出码：0 成功，1 拒绝或结果不明，2 参数错误，3 超时；不要盲目重试 `toggle`。
 
-核心符号（nm 名称）：
+模式记忆在 `~/Library/Preferences/local.orkward.wetype.patch.plist`，`fixedAppModes` 存固定配置，`appModes` 存记忆。CLI 切换成功后立即保存；原生手动切换在离开应用时保存，提前退出进程可能丢失这次变化。`app-set`、`app-forget`、`auto-on` 对当前应用立即应用规则。
+
+## 二进制分析与补丁
+
+以下结论对应 **2.2.3 (657) arm64**，符号地址及指纹见 `profiles/wetype-2.2.3-657.json`。
+
+### 模式处理
+
+主程序提取 arm64 slice，在现有 Mach-O header padding 中加入加载路径 `@executable_path/../Frameworks/libwetype-bridge.dylib`。原中文入口保留，新增 `.english` 入口，语言为 en，显示名仍为“微信输入法”。
+
+三处指令补丁：
+
+| 位置 | 修改及作用 |
+| --- | --- |
+| `isDefaultASCIIMode(bundleID:)` | 统一返回 false，让原生 getter、菜单及快捷键共用全局模式；更换 controller 不再隐式选中另一份应用模式。 |
+| `resetInputMode()` | 直接返回，停用激活超时、输入源同步和设置通知触发的模式重置。 |
+| `activateServer` 的 `0x1001187ac–0x100118880` | 同步调用 `WTBridgeActivate(controller)`，x22 为当前 controller；保留 `G.setting` 的 once 初始化、时间维护及后续菜单和输入状态更新。汇编见 `src/activation-arm64.s`。 |
+
+原生激活流程创建会话并设置 `currentInputController`；其 `didSet` 比较模式、按条件显示提示并更新提示标记，不直接切换模式。桥在目标 bundle ID 改变时保存旧模式、恢复新模式，不使用应用切换通知或轮询；同一应用重复激活或换 controller 不重新决策，避免覆盖手动切换。
+
+### 私有接口与 ABI
 
 ```text
 _$s6WeType15InputControllerC16currentASCIIModeSbvg
 _$s6WeType1GV22currentInputControllerAA0dE0CSgvpZ
 _$s6WeType1GV22currentInputController_Wz
 _$s6WeType11AppDelegateC15changeInputModeyyFTo
+_$s6WeType15InputControllerC7sessionAA0C7SessionCvg
+_$s6WeType12InputSessionC9sessionIDSuvg
+_$s6WeType5ToastC17showInputModeTips_4type11isASCIIModeySu_AC0efB0OSbtFZTf4nnnd_n
 ```
 
-用 `xcrun nm -arch arm64 -n` 和 LLDB 静态反汇编核查；LLDB 通常去掉首个下划线。
-确认原 getter 的全局回退、weak 存储/token、返回值含义、toggle 副作用。还要核查 ASCII 判断的全部调用点、模式重置的调用点及激活段的寄存器约定。当前三处补丁仅适配 2.2.3 (657)，旧 profile 不能用于构建这个版本的桥。
+- 当前 controller 是 Swift weak 存储，初始化 token 为 -1 后才能读取；`swift_unknownObjectWeakLoadStrong` 返回 +1 引用，交给 ARC 持有，不能把 weak 存储直接当对象指针。
+- `currentASCIIMode` 使用 Swift 调用约定，arm64 的 self 在 x20；`state.m` 用 Clang `swiftcall` / `swift_context` 调用。getter 可能触发原厂创建会话。
+- 模式切换调用原生 ObjC `changeInputMode`，不直接写 Boolean，也不手工解码 Swift Dictionary。
+- 私有地址加 ASLR slide 使用；运行时先校验宿主版本和整个 `__text` 指纹。
 
-`state.m` 使用 Swift weak runtime 取得控制器强引用，Clang `swiftcall` / `swift_context` 以 x20 传 self，不能改成普通 C ABI。
-动画新增三个 profile 审核符号：`InputController.session` getter、`InputSession.sessionID` getter、特化的 `Toast.showInputModeTips`。session getter 返回 +1 Swift 对象，用 `swift_release` 平衡，不能交给 ObjC ARC。arm64 提示函数参数为 x0=sessionID、w1=枚举 0（中英文）、w2=英文 Bool，特化入口已移除 metatype 参数。地址、枚举、所有权和 ABI 均须随版本重新审核。原生 `AppDelegate.changeInputMode` 不播放该动画，桥只在确认成功后补一次；不替换原生快捷键入口。
-初始化 token 必须为 -1；运行时先核对版本与整个 __text 哈希，再用符号地址加 ASLR slide。
-调用原 ObjC `changeInputMode`，不写 Boolean，不手工解码 Swift Dictionary。
-getter 可能触发原厂创建会话；没有当前控制器时不猜状态。
+### 原生翻转提示
 
-padding 不足、非零、未知 Mach-O 命令或指纹不符时停止，不自动挪 section 或删命令腾空间。
-适配后真实测试：TextEdit 中保持焦点，中文两次→英文两次→中文两次；核对第二次不切换，并检查实际文字/候选、跨应用记忆和新 PID 的自动加载。
+二进制保留的源码路径为 `WeType/Model/Toast.swift` 和 `WeType/Windows/ToastWindow.swift`。
 
-## 自动测试
+- `InputController.session` getter（`0x10011d78c`）返回 +1 Swift 对象，用 `swift_release` 释放；不能交给 ObjC ARC。`InputSession.sessionID` getter（`0x100392c38`）同样以 x20 传 self。
+- 特化的 `Toast.showInputModeTips`（`0x10035e124`）参数为 x0=sessionID、w1=枚举标签、w2=英文 Bool；标签 0 表示中英文，metatype 参数已被优化移除。
+- 它通过 `Windows.cursorRect` 定位光标，选择 `input_chinese` / `input_english` 图标，调用 `ToastWindow.show(...shouldFlip:)` 执行 `transform.rotation.y` 翻转和淡出；光标位置不可用时不显示。
+- 原生 `AppDelegate.changeInputMode` 路径不播放提示，原生快捷键路径会播放。桥只在自动或 CLI 切换确认模式改变后补一次，不挂钩原生快捷键，不等待动画、不缓存按键。
+
+### 版本适配
 
 ```sh
-python3 -B tests/run.py
+python3 -B patch.py inspect /path/to/new/WeType.app > profiles/new-candidate.json
 ```
 
-mock 测试覆盖自动/CLI 切换、同模式、重复请求、目标或输入源变化、未知结果、动画异常隔离；同时编译生产桥。测试不启动宿主、不修改偏好或安装包。实际光标定位、图标和翻转效果仍需安装后检查：中→英→中、跨应用恢复、相同模式不重复、原生快捷键不叠加。
+`inspect` 只提取符号与指纹，候选默认 `reviewed=false`。用 `xcrun nm -arch arm64 -n` 和 LLDB 核查 getter 回退、weak 存储、toggle 副作用、激活段寄存器，以及提示函数的枚举和所有权；不能仅替换版本号或哈希。profile 中的 x86_64 信息仅用于识别原包。
 
-## 已知边界
+官方包地址查询：`https://z.weixin.qq.com/web/mac/download?channel=InstallInfo`，字段为 `zip_download_url` 和 `zip_download_md5`。
 
-dylib 随宿主启动，在主队列等 delegate 就绪后注册 IPC。使用同登录会话的 distributed notifications，缓存最近 128 个请求去重；不是永久 exactly-once。
-通道名为 `local.orkward.wetype.bridge.request.v1` / `reply.v1`，**不认证同会话进程身份**，其他本地程序可能发请求、修改应用模式配置或伪造回复。
-自动恢复仅在原生激活回调中确认当前输入源与 controller 后执行；目标不确定时不改变模式，不安排延迟重试。`stop` 同时停用 IPC 和自定义决策，原生手动切换仍可用。
+## 运行限制
 
-app 使用 ad-hoc 签名，保留 Hardened Runtime，允许库加载、移除调试权限。这不是腾讯签名或苹果公证；不关闭 SIP，不改 TCC。
+- 2.2.3 原厂要求安装在 `/Library/Input Methods/WeType.app`，拒绝用户目录；更新同一路径、bundle ID 和入口 ID 时不需重复注册。
+- IPC 使用同登录会话的 distributed notifications，通道为 `local.orkward.wetype.bridge.request.v1` / `reply.v1`，最近 128 个请求去重；不认证发送进程，其他本地程序可能发送请求或伪造回复。
