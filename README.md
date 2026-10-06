@@ -6,6 +6,8 @@
 - 支持 CLI 切换，模式改变时显示原生翻转提示。
 - 停用原厂自动模式重置，保留手动切换；新增英文输入源入口。
 
+Windows 版见文末 [Windows](#windows) 一节。
+
 ## 构建与安装
 
 需要 Python 3、Xcode Command Line Tools 和 just。先安装官方输入法，另备一份未修改的同版本 app 作为构建输入。
@@ -119,3 +121,92 @@ python3 -B patch.py inspect /path/to/new/WeType.app > profiles/new-candidate.jso
 
 - 2.2.3 原厂要求安装在 `/Library/Input Methods/WeType.app`，拒绝用户目录；更新同一路径、bundle ID 和入口 ID 时不需重复注册。
 - IPC 使用同登录会话的 distributed notifications，通道为 `local.orkward.wetype.bridge.request.v1` / `reply.v1`，最近 128 个请求去重；不认证发送进程，其他本地程序可能发送请求或伪造回复。
+
+## Windows
+
+适用于微信输入法 Windows 版，在 WeType 2.1.4.6、Windows 10 21H2 x64 上验证。
+
+- 按应用恢复中英文模式，优先级为固定配置、应用记忆、默认英文。
+- 提供 CLI 查看和切换当前应用的中英文模式。
+- 停用系统的 Ctrl+Space 输入法开关热键，Ctrl+Space 交给应用使用。
+
+不修改 WeType 文件，不注入进程。
+
+### 构建
+
+需要 portablemsvc（x64 工具链）、nushell 和 just。源码在 `src/windows/wetype-cli.cpp`。
+
+```nu
+just build        # 输出 build/wetype-cli.exe
+```
+
+### 运行方式
+
+- justfile 和 whkdrc 调用的是 `C:\Program Files\Tencent\WeType\wetype-mode\wetype-cli.exe`，构建后手动复制过去。
+- 守护进程由计划任务 `wetype-mode` 在登录时以最高权限启动，动作是 `conhost.exe --headless wetype-cli.exe daemon`，不显示窗口。提升权限后守护进程也能处理管理员权限窗口。任务需关闭运行时长限制，否则 72 小时后被结束。
+- `wetype-cli start` 先运行这个任务，守护进程以提升权限启动且没有 UAC 提示。任务不存在时直接启动普通权限的守护进程。
+
+### 命令
+
+```sh
+wetype-cli start                       # 后台启动守护进程
+wetype-cli stop
+wetype-cli daemon                      # 前台运行，日志同时输出到 stderr
+wetype-cli status                      # 前台应用的当前模式
+wetype-cli chinese
+wetype-cli english
+wetype-cli toggle
+wetype-cli auto-status
+wetype-cli auto-on
+wetype-cli auto-off
+wetype-cli apps
+wetype-cli app-set chrome.exe english  # 固定应用模式
+wetype-cli app-forget chrome.exe       # 删除固定配置，恢复应用记忆
+wetype-cli hotkey                      # 系统 Ctrl+Space 热键状态
+wetype-cli hotkey fix
+wetype-cli hotkey restore
+```
+
+- 应用以小写 exe 文件名区分，省略扩展名时补 `.exe`。UWP 应用取 ApplicationFrameHost 内实际应用进程的 exe 名。
+- `status`、`chinese`、`english`、`toggle` 在没有守护进程时直接作用于前台窗口，不写入记忆。有守护进程时，切换成功后立即保存为该应用的记忆。
+- `app-set` 的固定配置不会被手动切换或记忆覆盖，应用内仍可手动切换。`app-set`、`app-forget`、`auto-on` 对当前前台应用立即应用规则。
+- `auto-off` 保留当前模式，停止记忆和恢复。`stop` 退出守护进程。
+- 输出为 JSON。`status` 的 `ok` 只表示请求得到应答，实际模式看 `stateKnown` 和 `mode`。退出码：0 成功，1 拒绝或结果不明，2 参数错误，3 守护进程不可达。
+
+状态保存在 `~/.local/state/wetype-mode/modes.tsv`，每行一条，`auto`、`fixed`、`app` 三种记录。日志在同目录的 `daemon.log`。
+
+### 原理
+
+#### 中英文模式
+
+WeType 的 TSF 输入法 `wetype_tip_core.dll` 基于 Mozc 改写，源码路径保留在二进制里（`wxkb\01_mozc\win32\tip\tip_text_service.cc`）。
+
+- 中英文模式就是 TSF 的 `GUID_COMPARTMENT_KEYBOARD_OPENCLOSE`，值为 1 是中文，0 或空是英文。按 Shift 切换时由 WeType 写这个值。
+- WeType 把模式当作全局值。线程获得焦点时，`TipTextServiceImpl::SwitchInputMode` 把全局值写进该线程，调用点在 `wetype_tip_core.dll+0x104ea4`。新进程也继承最近一次的模式。
+- IMM 的打开状态与 OPENCLOSE 同步。向线程默认 IME 窗口（`ImmGetDefaultIMEWnd`）发送 `WM_IME_CONTROL` 的 `IMC_GETOPENSTATUS`（5）和 `IMC_SETOPENSTATUS`（6），可以跨进程读写，WeType 在 `OnChange` 中收到变化并更新全局值。已在 Win32 编辑框、记事本和 wezterm 中验证读写，Chrome、Telegram、UWP CoreWindow 验证了读取。
+
+#### 守护进程
+
+1. 用 `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` 监听前台切换，延迟 80 ms 合并连续切换，同时让 WeType 先完成焦点同步。
+2. 读取上一个前台窗口的打开状态，保存为上一个应用的记忆。失去焦点的线程保留离开时的值，窗口已关闭时改用每秒轮询得到的最近值。
+3. 按固定配置、应用记忆、默认英文决定目标模式，不同则写入，150 ms 后校验，不符时重试一次。写入打开状态是幂等操作，重试不会来回切换。
+4. 同一进程内换窗口不重新决策，保留用户手动切换的结果。同一 exe 的新进程按切换处理。
+5. 跳过任务栏、任务切换界面、桌面等外壳窗口。前台线程的键盘布局语言不是 zh-CN 时不记忆也不恢复。
+
+CLI 和守护进程通过命名管道 `\\.\pipe\wetype-mode-<会话号>-<用户 SID>` 通信，DACL 只允许当前用户和 SYSTEM 连接，拒绝远程客户端。管道带中完整性标签，普通权限的 CLI 可以连接提升权限的守护进程。
+
+#### Ctrl+Space
+
+这个热键由系统注册和处理，WeType 只响应结果。
+
+- WeType 不调用 `ImmGetHotKey` 或 `ImmSetHotKey`，不读取热键注册表项。它用 `ITfKeystrokeMgr::PreserveKey` 注册的保留键只有 Shift+Space、Ctrl+.、Ctrl+Shift+F、Ctrl+Alt+I 四个。
+- 内核按 IME 热键表匹配到 Ctrl+Space 后回调 `USER32!_ClientImmProcessKey`，经 `IMM32!ImmProcessKey`、`MSCTF!CtfImeProcessCicHotkey`、`CThreadInputMgr::CallImm32HotkeyHanlder`、`MyToggleCompartmentDWORD` 翻转 OPENCLOSE，并吞掉 Space 的按下消息。因为 OPENCLOSE 就是 WeType 的中英文模式，Ctrl+Space 表现为中英文切换。
+- 热键表来自 `HKCU\Control Panel\Input Method\Hot Keys`。`user32!CliImmInitializeHotKeys` 在登录和键盘布局重新加载时读取该项，简体中文的 0x10、0x11、0x12 中缺哪一项就补回默认值，0x10 的默认值是 Ctrl+Space。系统设置里选“无”会删除 0x10，下次初始化时 Ctrl+Space 又回来了。
+- `hotkey fix` 用 `ImmSetHotKey` 把 0x10 改成 Ctrl+Alt+Shift+F24，同时写入注册表和当前会话的热键表，初始化时不会再补默认值。守护进程启动时和之后每分钟检查一次，被改回时重新设置。`hotkey restore` 恢复 Ctrl+Space，需要先停止守护进程，否则一分钟内会被改回。
+
+### 限制
+
+- 守护进程以普通权限运行时（没有登录任务时 `wetype-cli start` 直接启动），无法读写管理员权限窗口（UIPI 拒绝跨完整性级别的消息），这些窗口不记忆也不恢复。由登录任务启动时没有这个限制。
+- 用键盘布局语言判断输入法，无法区分 WeType 和微软拼音等其他 zh-CN 输入法。
+- 应用退出前最后一秒内的手动切换可能没有保存。
+- 应用之间模式不同时，Alt+Tab 切换过程中 WeType 状态栏会闪几次。守护进程停止时同样操作也会出现，原因在 WeType 状态栏，最终模式正确。
